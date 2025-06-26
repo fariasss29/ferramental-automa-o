@@ -1,0 +1,39 @@
+import { Router } from "express";
+import conn from '@/db/conn';
+
+export const consulta_visitantes = Router();
+
+// Consulta todas as visitas - sem verificação de permissão/setor
+consulta_visitantes.get('/ferramentais/controle', async (req, res, next) => {
+  try {
+    const sql = `
+      SELECT
+        p.uuid,
+        p.part_number,
+        p.type,
+        p.cliente,
+        p.ppap,
+        p.tiragem,
+        p.budget,
+        p.budget_mensal,
+        p.descricao,
+        p.acumulado_vida,
+        p.tiragem_restante,
+        p.aviso,
+        p.vencimento,
+        p.estimado,
+        p.comprador,
+        p.commodite,
+        p.contrato
+      FROM ferramentais_controle p
+    `;
+    const [data] = await conn.query(sql);
+    res.status(200).send(data);
+    console.log('Consulta realizada com sucesso');
+  } catch (err) {
+    console.error('Erro ao realizar consulta:', err);
+    next(err);
+  }
+});
+
+export default consulta_visitantes;
