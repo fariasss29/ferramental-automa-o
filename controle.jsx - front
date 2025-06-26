@@ -1,0 +1,399 @@
+import React, { useState } from 'react';
+import {
+  Popover,
+  Box,
+  Paper,
+  Typography,
+  Chip,
+  useTheme,
+  TextField,
+  Button,
+  Drawer
+} from '@mui/material';
+import { DataGrid } from '@mui/x-data-grid';
+import { useQuery, useQueryClient } from 'react-query';
+import GridToolbar from '@/components/Toolbar';
+import axios from '@/services/axios';
+import BackdropLoading from '@/components/BackdropLoading';
+import Error from '@/components/Error';
+import toast from 'react-hot-toast';
+import { parseISO, format, differenceInMonths } from 'date-fns';
+import { PieChart } from '@mui/x-charts/PieChart';
+
+export default function FerramentaisControle() {
+  const queryClient = useQueryClient();
+  const theme = useTheme();
+  const [selectedDate, setSelectedDate] = useState('');
+  const [searchText, setSearchText] = useState('');
+  const [hoveredRow, setHoveredRow] = useState(null);
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [selectedRow, setSelectedRow] = useState(null);
+
+  const { isLoading, error, data } = useQuery(
+    'ferramentais',
+    () => axios.get('/ferramentais/controle').then(res => res.data),
+    { onError: () => toast.error('Erro ao carregar os ferramentais') }
+  );
+  if (isLoading) return <BackdropLoading />;
+  if (error) return <Error message={error.message} />;
+
+  const rows = data.map((item, idx) => {
+    const vencDate = parseISO(item.vencimento);
+    const monthsuntil = differenceInMonths(vencDate, new Date());
+    const status = monthsuntil < 0 ? 'Vencido' : monthsuntil <= 12 ? 'Alerta' : 'Válido';
+    return {
+      id: idx + 1,
+      status,
+      numero_peca: item.part_number,
+      tipo: item.type,
+      cliente: item.cliente,
+      PPAP: item.ppap,
+      tiragem: item.tiragem,
+      budget: item.budget,
+      budget_mensal: item.budget_mensal,
+      acumulado_vida: item.acumulado_vida,
+      observacao: item.descricao,
+      comprador: item.comprador,
+      mercadoria: item.commodite,
+      vencimento: item.vencimento,
+      aviso: item.aviso,
+    };
+  });
+
+  const filteredByDate = selectedDate
+    ? rows.filter(row => row.vencimento.slice(0, 10) === selectedDate)
+    : rows;
+
+  const filteredRows = searchText
+    ? filteredByDate.filter(row => {
+      const term = searchText.toLowerCase();
+      return (
+        String(row.numero_peca).toLowerCase().includes(term) ||
+        String(row.cliente).toLowerCase().includes(term) ||
+        String(row.tiragem).toLowerCase().includes(term) ||
+        String(row.tipo).toLowerCase().includes(term) ||
+        String(row.budget).toLowerCase().includes(term) ||
+        String(row.budget_mensal).toLowerCase().includes(term) ||
+        String(row.acumulado_vida).toLowerCase().includes(term) ||
+        String(row.observacao).toLowerCase().includes(term) ||
+        String(row.comprador).toLowerCase().includes(term) ||
+        String(row.mercadoria).toLowerCase().includes(term) ||
+        String(row.status).toLowerCase().includes(term)
+      );
+    })
+    : filteredByDate;
+
+  const columns = [
+    {
+      field: 'status',
+      headerName: 'Status',
+      minWidth: 140,
+      headerAlign: 'center',
+      align: 'center',
+      renderCell: ({ value }) => (
+        <Chip
+          label={value}
+          size="medium"
+          color={
+            value === 'Vencido'
+              ? 'error'
+              : value === 'Alerta'
+                ? 'warning'
+                : 'success'
+          }
+          sx={{
+            width: '100%',
+            fontWeight: 'bold',
+            textAlign: 'center',
+            height: 36,
+            color: '#fff',
+          }}
+        />
+      ),
+    },
+    {
+      field: 'vencimento',
+      headerName: 'Vencimento',
+      minWidth: 140,
+      headerAlign: 'center',
+      align: 'center',
+      renderCell: ({ value }) =>
+        value ? format(parseISO(value), 'dd/MM/yyyy') : '',
+    },
+    { field: 'numero_peca', headerName: 'Número da peça', minWidth: 120, headerAlign: 'center', align: 'center' },
+    { field: 'tipo', headerName: 'Tipo', minWidth: 100, headerAlign: 'center', align: 'center' },
+    { field: 'cliente', headerName: 'Cliente', minWidth: 270, headerAlign: 'center', align: 'center' },
+    {
+      field: 'PPAP',
+      headerName: 'SOP',
+      minWidth: 140,
+      headerAlign: 'center',
+      align: 'center',
+      renderCell: ({ value }) =>
+        value ? format(parseISO(value), 'dd/MM/yyyy') : '',
+    },
+    { field: 'tiragem', headerName: 'Tiragem', minWidth: 120, headerAlign: 'center', align: 'center' },
+    { field: 'budget', headerName: 'Budget', minWidth: 100, headerAlign: 'center', align: 'center' },
+    { field: 'budget_mensal', headerName: 'Budget Mensal', minWidth: 140, headerAlign: 'center', align: 'center' },
+    { field: 'acumulado_vida', headerName: 'Acumulado de vida', minWidth: 160, headerAlign: 'center', align: 'center' },
+    { field: 'observacao', headerName: 'Descrição', minWidth: 320, headerAlign: 'center', align: 'center' },
+    { field: 'comprador', headerName: 'Comprador', minWidth: 180, headerAlign: 'center', align: 'center' },
+    { field: 'mercadoria', headerName: 'Mercadoria', minWidth: 140, headerAlign: 'center', align: 'center' },
+  ];
+
+  return (
+    <Box sx={{ width: '100%', p: 1, display: 'flex', justifyContent: 'center' }}>
+      <Paper elevation={2} sx={{ borderRadius: 5, overflow: 'hidden' }}>
+        {/* Cabeçalho */}
+        <Box sx={{ p: 2, backgroundColor: theme.palette.grey[100] }}>
+          <Typography variant="h5" sx={{ fontWeight: 600 }}>
+            Ferramentais
+          </Typography>
+        </Box>
+
+        {/* Filtros */}
+        <Paper elevation={1} sx={{ mt: 0, mb: 1, p: 2, gap: 2, alignItems: 'center', borderRadius: 2, width: '100%',display: 'flex' }}>
+          <TextField
+            label="Pesquisar"
+            type="text"
+            size="small"
+            sx={{ width: 1000 }}
+            value={searchText}
+            onChange={e => setSearchText(e.target.value)}
+          />
+          <TextField
+            label="Filtrar por data"
+            type="date"
+            size="small"
+            sx={{ width: 400 }}
+            InputLabelProps={{ shrink: true }}
+            value={selectedDate}
+            onChange={e => setSelectedDate(e.target.value)}
+          />
+          <Button
+            variant="outlined"
+            sx={{ height: 36, width: 120 }}
+            onClick={() => {
+              setSelectedDate('');
+              setSearchText('');
+            }}
+          >
+            Limpar
+          </Button>
+        </Paper>
+
+        {/* DataGrid */}
+        <Box sx={{ width: '100%', overflowX: 'auto', borderRadius: 5, flex: 1}}>
+          <Paper elevation={1} sx={{ mb: 0 }}>
+            <DataGrid
+              rows={filteredRows}
+              columns={columns}
+              initialState={{ pagination: { paginationModel: { pageSize: 8, page: 5 } } }}
+              pagination
+              pageSizeOptions={[8, 10, 20]}
+              density="comfortable"
+              disableSelectionOnClick
+              hideFooterSelectedRowCount //demorei pra descobrir essa bosta, tira a "1 linha selecionada"
+              disableColumnMenu //tira os filtro da coluna tava chato pra arrumar o de dato e eu ja fiz em cima entao resolvi tirar
+              components={{ Toolbar: GridToolbar }}
+              onRowClick={params => setSelectedRow(params.row)}
+              onCellMouseEnter={(params, event) => {
+                setHoveredRow(params.row);
+                setAnchorEl(event.currentTarget);
+              }}
+              onCellMouseLeave={() => {
+                setHoveredRow(null);
+                setAnchorEl(null);
+              }}
+              sx={{
+                border: 'none',
+                '.MuiDataGrid-columnHeaders': {
+                  backgroundColor: theme.palette.grey[50],
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.04)',
+                  fontSize: '1rem',
+                  fontWeight: 600,
+                  borderBottom: `1px solid ${theme.palette.divider}`,
+                },
+                '.MuiDataGrid-cell': {
+                  borderBottom: `1px solid ${theme.palette.divider}`,
+                  fontSize: '0.95rem',
+                  px: 2.5,
+                },
+                '.MuiDataGrid-row:nth-of-type(odd)': {
+                  backgroundColor: theme.palette.action.hover,
+                },
+              }}
+            />
+
+            <Popover
+              open={!!hoveredRow}
+              anchorEl={anchorEl}
+              onClose={() => {
+                setHoveredRow(null);
+                setAnchorEl(null);
+              }}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+              PaperProps={{
+                sx: {
+                  p: 2,
+                  borderRadius: 2,
+                  boxShadow: 3,
+                  minWidth: 280,
+                  backgroundColor: theme.palette.background.paper,
+                },
+              }}
+            >
+              {hoveredRow && (
+                <Box display="flex" flexDirection="column" gap={1}>
+                  <Typography variant="subtitle2" color="textSecondary">
+                    Ferramental
+                  </Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                    {hoveredRow.numero_peca}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Tipo:</strong> {hoveredRow.tipo}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Cliente:</strong> {hoveredRow.cliente}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Comprador:</strong> {hoveredRow.comprador}
+                  </Typography>
+                </Box>
+              )}
+            </Popover>
+          </Paper>
+        </Box>
+
+        {/* Drawer de detalhes */}
+        <Drawer
+          anchor="right"
+          open={!!selectedRow}
+          onClose={() => setSelectedRow(null)}
+          PaperProps={{ sx: { width: 360, p: 3 } }}
+        >
+          {selectedRow ? (
+            <Box display="flex" flexDirection="column" gap={2}>
+              <Typography variant="subtitle2" color="textSecondary" sx={{ mt: 3, fontWeight: 700, fontSize: 10 }}>
+                Ferramental
+              </Typography>
+              <Typography variant="h3" sx={{ fontWeight: 700, lineHeight: 1.1 }}>
+                {selectedRow.numero_peca}
+              </Typography>
+             <Typography variant="body1" sx={{ fontSize: '1.25rem', fontWeight: 500 }}>
+                <Box
+                  component="span"
+                  sx={{ fontSize: 'inherit', fontWeight: 'bold', mr: 0.5 }}
+                >
+                  Tipo:
+                </Box>
+                {selectedRow.tipo}
+              </Typography>
+              <Typography variant="body1" sx={{ fontSize: '1.25rem', fontWeight: 500 }}>
+                <Box
+                  component="span"
+                  sx={{ fontSize: 'inherit', fontWeight: 'bold', mr: 0.5 }}
+                >
+                  Cliente:
+                </Box>
+                {selectedRow.cliente}
+              </Typography>
+              <Typography variant="body1" sx={{ fontSize: '1.25rem', fontWeight: 500 }}>
+                <Box
+                  component="span"
+                  sx={{ fontSize: 'inherit', fontWeight: 'bold', mr: 0.5 }}
+                >
+                  Comprador:
+                </Box>
+                {selectedRow.comprador}
+              </Typography>
+             <Typography variant="body1" sx={{ fontSize: '1.25rem', fontWeight: 500 }}>
+                <Box
+                  component="span"
+                  sx={{ fontSize: 'inherit', fontWeight: 'bold', mr: 0.5 }}
+                >
+                  Mercadoria:
+                </Box>
+                {selectedRow.mercadoria}
+              </Typography>
+              <Typography variant="body1"sx={{ fontSize: '1.25rem', fontWeight: 500 }}>
+                <Box
+                  component="span"
+                  sx={{ fontSize: 'inherit', fontWeight: 'bold', mr: 0.5 }}
+                >
+                  Aviso:
+                </Box>
+                {selectedRow.aviso
+                  ? format(parseISO(selectedRow.aviso), 'dd/MM/yyyy')
+                  : 'Nenhuma observação disponível.'}
+              </Typography>
+              <Typography variant="body1"sx={{ fontSize: '1.25rem', fontWeight: 500 }}>
+                <Box
+                  component="span"
+                  sx={{ fontSize: 'inherit', fontWeight: 'bold', mr: 0.5 }}
+                >
+                  Vencimento:
+                </Box>
+                {selectedRow.vencimento
+                  ? format(parseISO(selectedRow.vencimento), 'dd/MM/yyyy')
+                  : 'Nenhuma observação disponível.'}
+              </Typography>
+              <Chip
+                label={`Status: ${selectedRow.status}`}
+                color={
+                  selectedRow.status === 'Vencido'
+                    ? 'error'
+                    : selectedRow.status === 'Alerta'
+                      ? 'warning'
+                      : 'success'
+                }
+                sx={{ width: '100%', fontWeight: 600 }}
+              />
+              <PieChart
+                series={[
+                  {
+                    data: [
+                      { id: 0, value: selectedRow.budget, label: 'Budget' },
+                      { id: 1, value: selectedRow.tiragem, label: 'Tiragem' },
+                      { id: 2, value: selectedRow.acumulado_vida, label: 'Acm. Vida' },
+                    ],
+                  },
+                ]}
+                width={200}
+                height={200}
+              />
+              <Typography variant="body2" color="textSecondary" sx={{ fontSize: '1rem', fontWeight: 500 }}>
+              <Box
+                  component="span"
+                  sx={{ fontSize: 'inherit', fontWeight: 'bold', mr: 0.5 }}
+                >
+                  SOP:
+                </Box>
+                {selectedRow.PPAP
+                  ? format(parseISO(selectedRow.PPAP), 'dd/MM/yyyy')
+                  : 'Nenhuma observação disponível.'}
+              </Typography>
+              <Typography variant="body2" color="textSecondary" sx={{ fontSize: '1rem', fontWeight: 500 }}>
+                 <Box
+                  component="span"
+                  sx={{ fontSize: 'inherit', fontWeight: 'bold', mr: 0.5 }}
+                >
+                  Descrição:
+                </Box>
+                {selectedRow.observacao || 'Nenhuma observação disponível.'}
+              </Typography>
+            </Box>
+          ) : (
+            <Box p={2}>
+              <Typography color="textSecondary" align="center">
+                Selecione uma linha acima para ver detalhes.
+              </Typography>
+            </Box>
+          )}
+        </Drawer>
+      </Paper>
+    </Box>
+  );
+}
