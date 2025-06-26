@@ -1,0 +1,139 @@
+import pandas as pd
+import uuid, os, datetime, locale
+from modulos.get_MB51 import get_MB51
+from rich.console import Console
+from sqlalchemy import create_engine, Column, Integer, String, Date
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+# ---------- Configuração do banco ----------
+DATABASE_URL = "mysql+pymysql://kaue@camfdv504:3306/portal-log-dev"
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    connect_args={"password": "&4XUVog%AEM9izg$"}
+)
+Session = sessionmaker(bind=engine)
+Base = declarative_base()
+
+class Ferramental(Base):
+    __tablename__ = 'ferramentais_controle'
+    uuid           = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    part_number    = Column(String(200))
+    type           = Column(String(200))
+    cliente        = Column(String(500))
+    ppap           = Column(Date)
+    tiragem        = Column(Integer)
+    budget         = Column(Integer)
+    budget_mensal  = Column(Integer)
+    descricao      = Column(String(400))
+    acumulado_vida = Column(Integer)
+    tiragem_restante = Column(Integer)
+    aviso          = Column(Date)
+    vencimento     = Column(Date)
+    estimado       = Column(Integer)
+    comprador      = Column(String(300))
+    commodite      = Column(String(300))
+    contrato       = Column(Integer)
+
+# ---------- Funções utilitárias ----------
+def setup_locale():
+    locale.setlocale(locale.LC_TIME, "pt_br")
+
+def create_directory_structure():
+    today = datetime.date.today()
+    os.makedirs(os.path.join("relatorios", str(today.year)), exist_ok=True)
+
+# ---------- Script principal ----------
+def main():
+    console = Console()
+    console.log("INICIANDO AS BIBLIOTECAS...")
+    setup_locale()
+    create_directory_structure()
+
+    # 1) Lê o template
+    tpl = pd.read_excel("./modelo/ferramentais.xlsx", sheet_name="Controle de Ferramentais")
+    tpl['PARTNUMBER'] = tpl['PARTNUMBER'].astype(str)
+    tpl['PPAP']       = pd.to_datetime(tpl['PPAP'], format='%d/%m/%Y')
+    tpl['ESTIMADO']   = pd.to_numeric(tpl['ESTIMADO'], errors='coerce').fillna(0).astype(int)
+    for col in ['COMPRADOR','COMMODITE']:
+        tpl[col] = tpl.get(col, pd.Series('')).fillna('')
+
+    # 2) MB51 completo (sem filtro PPAP) ------------
+    df_full = get_MB51()
+
+    # descrição (moda) SEM filtrar PPAP
+    desc_agg = (df_full.groupby('PARTNUMBER')['DESCRICAO']
+                .agg(lambda x: x.mode().iloc[0] if not x.mode().empty else '')
+                .reset_index())
+
+    # testes
+    df_qty = df_full.copy()
+    for part in tpl.itertuples(index=False):
+        df_qty = df_qty[~(
+            (df_qty['DATA'] <= part.PPAP) &
+            (df_qty['PARTNUMBER'] == part.PARTNUMBER)
+        )]
+
+    qty_agg = (df_qty.groupby('PARTNUMBER', as_index=False)['QUANTIDADE']
+               .sum()
+               .rename(columns={'QUANTIDADE':'ACUMULADO VIDA'}))
+
+    # junta quantidade + descrição
+    df_agg = pd.merge(qty_agg, desc_agg, on='PARTNUMBER', how='left')
+
+    # Merge com template
+    df = pd.merge(tpl, df_agg, on='PARTNUMBER', how='left')
+    df['ACUMULADO VIDA'] = df['ACUMULADO VIDA'].fillna(0).astype(int)
+    df['DESCRICAO']      = df['DESCRICAO'].fillna('').str.upper()
+
+    # Cálculos adicionais
+    df['BUDGET MENSAL']     = (df['BUDGET'] / 12).round(2)
+    df['TIRAGEM RESTANTE']  = (df['TIRAGEM'] - (df['ACUMULADO VIDA'] + df['ESTIMADO'])).astype(int)
+    df['VENCIMENTO EM DIAS'] = round(df['TIRAGEM RESTANTE'] / (df['BUDGET MENSAL']/30), 0)
+    df = df.dropna(subset=['VENCIMENTO EM DIAS'])
+    df = df[~df['VENCIMENTO EM DIAS'].isin([float('inf'), float('-inf')])]
+    df = df[(df['VENCIMENTO EM DIAS']<=15000)&(df['VENCIMENTO EM DIAS']>=-15000)]
+    df['VENCIMENTO EM DIAS'] = df['VENCIMENTO EM DIAS'].astype(int)
+
+
+    today = datetime.datetime.today()
+    df['VENCIMENTO'] = today + pd.to_timedelta(df['VENCIMENTO EM DIAS'], unit='D')
+    df['AVISO']      = df['VENCIMENTO'] - pd.Timedelta(days=455)
+    df['PPAP']       = df['PPAP'].dt.date
+
+    # Ajusta nomes p/ itertuples
+    df.rename(columns={
+        'BUDGET MENSAL':      'BUDGET_MENSAL',
+        'ACUMULADO VIDA':     'ACUMULADO_VIDA',
+        'TIRAGEM RESTANTE':   'TIRAGEM_RESTANTE',
+        'VENCIMENTO EM DIAS': 'VENCIMENTO_EM_DIAS'
+    }, inplace=True)
+
+
+    Base.metadata.create_all(engine)
+    sess = Session()
+    sess.query(Ferramental).delete()
+    for r in df.itertuples(index=False):
+        sess.add(Ferramental(
+            part_number      = r.PARTNUMBER,
+            type             = r.TIPO,
+            cliente          = r.CLIENTE,
+            ppap             = r.PPAP,
+            budget           = int(r.BUDGET),
+            tiragem          = int(r.TIRAGEM),
+            budget_mensal    = int(r.BUDGET_MENSAL),
+            descricao        = r.DESCRICAO,
+            acumulado_vida   = int(r.ACUMULADO_VIDA),
+            tiragem_restante = int(r.TIRAGEM_RESTANTE),
+            aviso            = r.AVISO.date(),
+            vencimento       = r.VENCIMENTO.date(),
+            estimado         = int(r.ESTIMADO),
+            comprador        = r.COMPRADOR,
+            commodite        = r.COMMODITE,
+            contrato         = None
+        ))
+    sess.commit()
+    console.log("TODAS AS LINHAS INSERIDAS COM A DESCRIÇÃO CORRETA!")
+
+if __name__ == '__main__':
+    main()
