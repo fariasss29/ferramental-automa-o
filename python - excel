@@ -1,0 +1,96 @@
+import pandas as pd
+import os
+import datetime
+import locale
+from modulos.get_MB51 import get_MB51
+from modulos.style import style
+from rich.console import Console
+
+
+def setup_locale():
+    """Configura a localidade para português do Brasil."""
+    locale.setlocale(locale.LC_TIME, "pt_br")
+
+
+def create_directory_structure():
+    """Cria a estrutura de diretórios para salvar os relatórios."""
+    today = datetime.date.today()
+    month = today.strftime("%B").upper()
+    year = today.year
+    day = today.strftime("%d.%m.%Y")
+    directory = fr'.\relatorios\{year}\{month}\{day}'
+
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    else:
+        for f in os.listdir(directory):
+            os.remove(os.path.join(directory, f))
+
+    return directory
+
+
+def main():
+    """Função principal."""
+    console = Console()
+    console.log(f'INICIANDO AS BIBLIOTECAS...')
+
+    setup_locale()
+    directory = create_directory_structure()
+
+    ferramentais = pd.read_excel(f'./modelo/ferramentais.xlsx', sheet_name='Controle de Ferramentais')
+    ferramentais['PARTNUMBER'] = ferramentais['PARTNUMBER'].astype(str)
+    ferramentais['PPAP'] = pd.to_datetime(ferramentais['PPAP'], format='%d/%m/%Y')
+    ferramentais['PARTNUMBER'].drop_duplicates().to_clipboard(index=False, header=False)
+    ferramentais['ESTIMADO'] = pd.to_numeric(ferramentais['ESTIMADO'], errors='coerce').fillna(0)
+
+    df = get_MB51()
+    print(df)
+    ppap = ferramentais.values.tolist()
+
+    for ferramental in ppap:
+        df = df.drop(df[(df['DATA'] <= ferramental[4]) & (df['PARTNUMBER'] == ferramental[1])].index)
+
+    df = df.groupby(['PARTNUMBER', 'DESCRICAO'], as_index=False)['QUANTIDADE'].sum()
+    df.rename(columns={'QUANTIDADE': 'ACUMULADO VIDA'}, inplace=True)
+    df = pd.merge(ferramentais, df, how='left', on='PARTNUMBER')
+
+    console.log(f'JUNTANDO TODOS OS DADOS EM UM ÚNICO DATAFRAME...')
+
+    df.fillna(0, inplace=True)
+    df['BUDGET MENSAL'] = round(df['BUDGET'] / 12, 2)
+    df['TIRAGEM RESTANTE'] = (df['TIRAGEM'] - (df['ACUMULADO VIDA'] + df['ESTIMADO'])).astype(int)
+    df['VENCIMENTO EM DIAS'] = round(df['TIRAGEM RESTANTE'] / (df['BUDGET MENSAL'] / 30), 0)
+    df = df.dropna(subset=['VENCIMENTO EM DIAS'])
+    df = df[~df['VENCIMENTO EM DIAS'].isin([float('inf'), float('-inf')])]
+    df = df[(df['VENCIMENTO EM DIAS'] <= 15000) & (df['VENCIMENTO EM DIAS'] >= -15000)]
+
+    df['VENCIMENTO EM DIAS'] = df['VENCIMENTO EM DIAS'].astype(int)
+    df['DESCRICAO'] = df['DESCRICAO'].str.upper()
+    df['VENCIMENTO'] = pd.to_datetime(datetime.datetime.today()) + pd.to_timedelta(df['VENCIMENTO EM DIAS'], unit='D')
+    df['PPAP'] = pd.to_datetime(df['PPAP']).dt.strftime('%d/%m/%Y')
+    df['PO'] = df['VENCIMENTO'] - pd.Timedelta(days=455)
+
+    console.log(f'CALCULANDO A PO...')
+    
+    df = df.sort_values(by=['PO'], ascending=True)
+    df['VENCIMENTO'] = df['VENCIMENTO'].dt.strftime('%d/%m/%Y')
+    df['AVISO'] = df['PO'].dt.strftime('%d/%m/%Y')
+    df = df[['PARTNUMBER', 'TIPO', 'CLIENTE', 'PPAP', 'TIRAGEM', 'BUDGET', 'BUDGET MENSAL', 'DESCRICAO',
+             'ACUMULADO VIDA',
+             'TIRAGEM RESTANTE', 'AVISO', 'VENCIMENTO']]
+
+    console.log(f'CALCULANDO A DATA LIMITE PARA ALERTA DE PRIORIDADE...')
+    console.log(f'PINTANDO O EXCEL DE ACORDO COM A DATA DE VENCIMENTO E PO...')
+
+    dfStyled = df.style.map(style, subset=pd.IndexSlice[:, ['AVISO', 'VENCIMENTO']])
+
+    nomeArquivo = datetime.datetime.today().strftime("%d.%m.%Y")
+    dfStyled.to_excel(f'{directory}/{nomeArquivo}.xlsx', index=False)
+
+    console.log("RELATÓRIO GERADO!")
+    print('=*=' * 20)
+    input('Pressione a tecla ENTER para finalizar...')
+
+
+if __name__ == "__main__":
+    main()
